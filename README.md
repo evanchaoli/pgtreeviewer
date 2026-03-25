@@ -1,4 +1,4 @@
-# PostgreSQL Tree Viewer (Experiment)
+# PostgreSQL Tree Viewer
 
 <img src="./screenshort.png" alt="PG Tree Viewer" width="720" />
 
