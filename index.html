@@ -1,0 +1,810 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>PostgreSQL Query Tree Viewer</title>
+  <style>
+    :root {
+      --bg: #f5f3ef;
+      --panel: #fffdfa;
+      --ink: #22201c;
+      --muted: #6f675c;
+      --accent: #0f766e;
+      --line: #d7cec2;
+      --warn: #b42318;
+      --code-bg: #f2ede5;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      font-family: "Avenir Next", "Segoe UI", sans-serif;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at 20% 20%, #efe6d6 0%, transparent 34%),
+        radial-gradient(circle at 80% 0%, #d9f3f1 0%, transparent 28%),
+        var(--bg);
+      min-height: 100vh;
+    }
+
+    .wrap {
+      max-width: 1280px;
+      margin: 24px auto;
+      padding: 0 16px 24px;
+    }
+
+    h1 {
+      margin: 0 0 8px;
+      font-size: clamp(1.4rem, 2.5vw, 2rem);
+      letter-spacing: 0.01em;
+    }
+
+    .sub {
+      margin: 0 0 18px;
+      color: var(--muted);
+      font-size: 0.95rem;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 14px;
+    }
+
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      box-shadow: 0 10px 30px rgba(41, 27, 11, 0.06);
+      overflow: hidden;
+    }
+
+    .toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      padding: 12px;
+      border-bottom: 1px solid var(--line);
+      background: #fff;
+    }
+
+    .conn {
+      padding: 12px;
+      border-bottom: 1px solid var(--line);
+      background: #fffdfa;
+    }
+
+    .conn-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 8px;
+      margin-bottom: 8px;
+    }
+
+    .conn-grid input {
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 8px;
+      font: 12px/1.2 "JetBrains Mono", "Menlo", monospace;
+      background: #fff;
+      color: var(--ink);
+    }
+
+    .hint {
+      margin: 0;
+      color: var(--muted);
+      font-size: 0.78rem;
+    }
+
+    button {
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 7px 12px;
+      background: #fff;
+      color: var(--ink);
+      cursor: pointer;
+      font-weight: 600;
+      font-size: 0.85rem;
+    }
+
+    button.primary {
+      background: var(--accent);
+      color: #fff;
+      border-color: var(--accent);
+    }
+
+    button:hover { filter: brightness(0.98); }
+
+    textarea {
+      width: 100%;
+      min-height: 460px;
+      border: 0;
+      outline: none;
+      padding: 14px;
+      resize: vertical;
+      font: 13px/1.35 "JetBrains Mono", "Menlo", monospace;
+      color: var(--ink);
+      background: var(--panel);
+      tab-size: 2;
+    }
+
+    .result {
+      min-height: 620px;
+      max-height: 74vh;
+      overflow: auto;
+      padding: 10px 12px 18px;
+      font: 13px/1.35 "JetBrains Mono", "Menlo", monospace;
+      background: var(--panel);
+    }
+
+    .msg {
+      margin: 0;
+      padding: 12px;
+      border-top: 1px solid var(--line);
+      background: #fff;
+      color: var(--muted);
+      font-size: 0.88rem;
+      white-space: pre-wrap;
+    }
+
+    .msg.error {
+      color: var(--warn);
+      font-weight: 600;
+    }
+
+    details {
+      margin: 2px 0;
+      padding-left: 14px;
+      border-left: 1px solid #e8ded0;
+    }
+
+    summary {
+      cursor: pointer;
+      list-style: none;
+      margin-left: -12px;
+      padding: 2px 0;
+      color: #433b31;
+      position: relative;
+    }
+
+    summary::-webkit-details-marker { display: none; }
+
+    summary::before {
+      content: "▸";
+      color: var(--accent);
+      position: absolute;
+      left: -14px;
+      top: 1px;
+      transition: transform 120ms ease;
+    }
+
+    details[open] > summary::before {
+      transform: rotate(90deg);
+    }
+
+    .leaf {
+      margin: 2px 0 2px 2px;
+      padding-left: 14px;
+      border-left: 1px dotted #e8ded0;
+      color: #2f2922;
+    }
+
+    .tag {
+      color: var(--accent);
+      font-weight: 700;
+    }
+
+    .field {
+      color: #7b2d26;
+      font-weight: 600;
+    }
+
+    .meta {
+      color: var(--muted);
+    }
+
+    .code {
+      background: var(--code-bg);
+      border: 1px solid #e7dbc7;
+      border-radius: 6px;
+      padding: 1px 4px;
+    }
+
+    .anno {
+      color: #1a5d57;
+      font-style: italic;
+      margin-left: 6px;
+    }
+
+    @media (max-width: 980px) {
+      .grid { grid-template-columns: 1fr; }
+      .conn-grid { grid-template-columns: 1fr 1fr; }
+      textarea, .result { min-height: 320px; }
+    }
+
+    @media (max-width: 600px) {
+      .conn-grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>PostgreSQL Tree Viewer</h1>
+    <p class="sub">Paste PG node dump text, render as a tree, and resolve OIDs from a local PostgreSQL instance.</p>
+
+    <div class="grid">
+      <section class="panel">
+        <div class="toolbar">
+          <button id="load-sample">Load Sample</button>
+          <button id="clear-input">Clear</button>
+          <button id="parse" class="primary">Parse & Render</button>
+        </div>
+        <div class="conn">
+          <div class="conn-grid">
+            <input id="conn-host" placeholder="Host" />
+            <input id="conn-port" placeholder="Port" />
+            <input id="conn-db" placeholder="Database" value="postgres" />
+            <input id="conn-user" placeholder="User" />
+            <input id="conn-pass" placeholder="Password" type="password" />
+            <input id="conn-extra" placeholder="Optional: app name" value="pg_tree_viewer" />
+          </div>
+          <div class="toolbar" style="padding:0;border:0;background:transparent;">
+            <button id="resolve">Resolve OIDs From DB</button>
+          </div>
+          <p class="hint">Run this page through <span class="code">server.py</span> so <span class="code">/api/resolve</span> can query PostgreSQL.</p>
+        </div>
+        <textarea id="input" spellcheck="false" placeholder="Paste tree text here..."></textarea>
+        <p class="msg" id="status">Ready.</p>
+      </section>
+
+      <section class="panel">
+        <div class="toolbar">
+          <button id="expand-all">Expand All</button>
+          <button id="collapse-all">Collapse All</button>
+          <button id="copy-json">Copy JSON</button>
+        </div>
+        <div class="result" id="tree"></div>
+        <p class="msg" id="meta">No parsed tree yet.</p>
+      </section>
+    </div>
+  </div>
+
+  <script>
+    const sample = `{QUERY
+  :commandType 1
+  :querySource 0
+  :canSetTag true
+  :utilityStmt <>
+  :rtable (
+    {RTE
+      :eref
+        {ALIAS
+          :aliasname devicedata
+          :colnames ("serial_number" "record_time")
+        }
+      :relid 16391
+      :relnamespace 2200
+      :relkind r
+    }
+  )
+  :jointree
+    {FROMEXPR
+      :fromlist (
+        {RANGETBLREF :rtindex 1}
+      )
+      :quals
+         {OPEXPR
+           :opno 98
+           :opfuncid 67
+         }
+    }
+}`;
+
+    const FIELD_LOOKUP_KIND = {
+      relid: 'relid',
+      reloid: 'relid',
+      indexrelid: 'relid',
+      resorigtbl: 'relid',
+      inhrelid: 'relid',
+      opno: 'opno',
+      eqop: 'opno',
+      sortop: 'opno',
+      opfuncid: 'funcid',
+      funcid: 'funcid',
+      aggfnoid: 'funcid',
+      winfnoid: 'funcid',
+      oprcode: 'funcid',
+      vartype: 'typeid',
+      consttype: 'typeid',
+      opresulttype: 'typeid',
+      funcresulttype: 'typeid',
+      varcollid: 'collid',
+      constcollid: 'collid',
+      inputcollid: 'collid',
+      funccollid: 'collid',
+      opcollid: 'collid',
+      relnamespace: 'nspid'
+    };
+
+    function tokenize(input) {
+      const tokens = [];
+      let i = 0;
+
+      const isSpace = (c) => /\s/.test(c);
+      const isDelim = (c) => c === '{' || c === '}' || c === '(' || c === ')' || c === ':';
+
+      while (i < input.length) {
+        const ch = input[i];
+
+        if (isSpace(ch)) {
+          i++;
+          continue;
+        }
+
+        if (ch === '{' || ch === '}' || ch === '(' || ch === ')') {
+          tokens.push({ type: ch, value: ch });
+          i++;
+          continue;
+        }
+
+        if (ch === '<' && input[i + 1] === '>') {
+          tokens.push({ type: 'NULL', value: '<>' });
+          i += 2;
+          continue;
+        }
+
+        if (ch === ':') {
+          i++;
+          let start = i;
+          while (i < input.length && /[A-Za-z0-9_.]/.test(input[i])) i++;
+          const name = input.slice(start, i);
+          if (!name) throw new Error('Invalid field name after ":"');
+          tokens.push({ type: 'FIELD', value: name });
+          continue;
+        }
+
+        if (ch === '"') {
+          i++;
+          let value = '';
+          while (i < input.length) {
+            const cur = input[i];
+            if (cur === '\\' && i + 1 < input.length) {
+              value += input[i + 1];
+              i += 2;
+              continue;
+            }
+            if (cur === '"') {
+              i++;
+              break;
+            }
+            value += cur;
+            i++;
+          }
+          tokens.push({ type: 'STRING', value });
+          continue;
+        }
+
+        let start = i;
+        while (i < input.length && !isSpace(input[i]) && !isDelim(input[i]) && !(input[i] === '<' && input[i + 1] === '>')) i++;
+        tokens.push({ type: 'ATOM', value: input.slice(start, i) });
+      }
+
+      return tokens;
+    }
+
+    function parse(input) {
+      const tokens = tokenize(input);
+      let p = 0;
+
+      function peek() { return tokens[p]; }
+      function next() { return tokens[p++]; }
+      function expect(type) {
+        const t = next();
+        if (!t || t.type !== type) {
+          throw new Error(`Expected ${type}, got ${t ? t.type : 'EOF'}`);
+        }
+        return t;
+      }
+
+      function parseScalarUntil(stopTypes) {
+        const bits = [];
+        while (p < tokens.length) {
+          const t = peek();
+          if (stopTypes.has(t.type)) break;
+          bits.push(next().value);
+        }
+        if (!bits.length) return { kind: 'null', value: '<missing>' };
+        return { kind: 'scalar', value: bits.join(' ') };
+      }
+
+      function parseValue(stopTypes = new Set(['FIELD', '}', ')'])) {
+        const t = peek();
+        if (!t) throw new Error('Unexpected EOF while parsing value');
+
+        if (t.type === '{') return parseNode();
+        if (t.type === '(') return parseList();
+        if (t.type === 'NULL') {
+          next();
+          return { kind: 'null', value: '<>' };
+        }
+
+        return parseScalarUntil(stopTypes);
+      }
+
+      function parseField() {
+        const field = expect('FIELD').value;
+        const t = peek();
+
+        if (!t || t.type === 'FIELD' || t.type === '}' || t.type === ')') {
+          return { kind: 'field', name: field, value: { kind: 'null', value: '<missing>' } };
+        }
+
+        const value = parseValue(new Set(['FIELD', '}', ')']));
+        return { kind: 'field', name: field, value };
+      }
+
+      function parseNode() {
+        expect('{');
+        const typeTok = next();
+        if (!typeTok || (typeTok.type !== 'ATOM' && typeTok.type !== 'STRING')) {
+          throw new Error(`Expected node type after '{', got ${typeTok ? typeTok.type : 'EOF'}`);
+        }
+
+        const node = { kind: 'node', type: typeTok.value, children: [] };
+
+        while (p < tokens.length) {
+          const t = peek();
+          if (!t) break;
+          if (t.type === '}') {
+            next();
+            return node;
+          }
+
+          if (t.type === 'FIELD') {
+            node.children.push(parseField());
+          } else {
+            node.children.push(parseValue(new Set(['FIELD', '}'])));
+          }
+        }
+
+        throw new Error(`Unclosed node {${node.type}}`);
+      }
+
+      function parseList() {
+        expect('(');
+        const list = { kind: 'list', items: [] };
+
+        while (p < tokens.length) {
+          const t = peek();
+          if (!t) break;
+          if (t.type === ')') {
+            next();
+            return list;
+          }
+
+          if (t.type === '{') {
+            list.items.push(parseNode());
+          } else if (t.type === '(') {
+            list.items.push(parseList());
+          } else if (t.type === 'NULL') {
+            next();
+            list.items.push({ kind: 'null', value: '<>' });
+          } else if (t.type === 'FIELD') {
+            list.items.push(parseField());
+          } else {
+            /* In lists, scalar items are whitespace-delimited. */
+            list.items.push({ kind: 'scalar', value: next().value });
+          }
+        }
+
+        throw new Error('Unclosed list (...)');
+      }
+
+      const roots = [];
+      while (p < tokens.length) {
+        roots.push(parseValue(new Set()));
+      }
+
+      return roots.length === 1 ? roots[0] : { kind: 'list', items: roots };
+    }
+
+    function parseOid(scalarText) {
+      if (!scalarText) return null;
+      const m = String(scalarText).match(/^\s*(-?\d+)/);
+      if (!m) return null;
+      const n = Number(m[1]);
+      if (!Number.isInteger(n) || n <= 0) return null;
+      return n;
+    }
+
+    function collectLookupRequests(item, out) {
+      if (!item) return;
+
+      if (item.kind === 'field') {
+        const lookupKind = FIELD_LOOKUP_KIND[item.name];
+        if (lookupKind && item.value && item.value.kind === 'scalar') {
+          const oid = parseOid(item.value.value);
+          if (oid != null) out[lookupKind].add(oid);
+        }
+        collectLookupRequests(item.value, out);
+        return;
+      }
+
+      if (item.kind === 'node') {
+        for (const child of item.children) collectLookupRequests(child, out);
+        return;
+      }
+
+      if (item.kind === 'list') {
+        for (const child of item.items) collectLookupRequests(child, out);
+      }
+    }
+
+    function buildLookupPayload(ast) {
+      const sets = {
+        relid: new Set(),
+        opno: new Set(),
+        funcid: new Set(),
+        typeid: new Set(),
+        collid: new Set(),
+        nspid: new Set()
+      };
+
+      collectLookupRequests(ast, sets);
+
+      const lookups = {};
+      for (const [k, set] of Object.entries(sets)) {
+        if (set.size > 0) lookups[k] = Array.from(set).sort((a, b) => a - b);
+      }
+      return lookups;
+    }
+
+    function readConnConfig() {
+      return {
+        host: document.getElementById('conn-host').value.trim(),
+        port: document.getElementById('conn-port').value.trim(),
+        database: document.getElementById('conn-db').value.trim() || 'postgres',
+        user: document.getElementById('conn-user').value.trim(),
+        password: document.getElementById('conn-pass').value,
+        application_name: document.getElementById('conn-extra').value.trim()
+      };
+    }
+
+    function renderTree(tree, mount) {
+      mount.innerHTML = '';
+      mount.appendChild(renderItem(tree, true));
+    }
+
+    function el(tag, cls, text) {
+      const n = document.createElement(tag);
+      if (cls) n.className = cls;
+      if (text != null) n.textContent = text;
+      return n;
+    }
+
+    function escapeHtml(s) {
+      return String(s)
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;');
+    }
+
+    const input = document.getElementById('input');
+    const treeEl = document.getElementById('tree');
+    const statusEl = document.getElementById('status');
+    const metaEl = document.getElementById('meta');
+    let lastAst = null;
+    let oidAnnotations = {};
+
+    function annotationFor(fieldName, scalarValue) {
+      const lookupKind = FIELD_LOOKUP_KIND[fieldName];
+      if (!lookupKind) return null;
+      const oid = parseOid(scalarValue);
+      if (oid == null) return null;
+      const map = oidAnnotations[lookupKind] || {};
+      return map[String(oid)] || null;
+    }
+
+    function renderItem(item, openByDefault = false) {
+      if (!item) return el('div', 'leaf', '<null>');
+
+      if (item.kind === 'scalar' || item.kind === 'null') {
+        const line = el('div', 'leaf');
+        line.innerHTML = `<span class="meta">${escapeHtml(item.kind)}:</span> <span class="code">${escapeHtml(item.value)}</span>`;
+        return line;
+      }
+
+      if (item.kind === 'field') {
+        if (item.value.kind === 'scalar' || item.value.kind === 'null') {
+          const annotation = annotationFor(item.name, item.value.value);
+          const line = el('div', 'leaf');
+          line.innerHTML = `<span class="field">:${escapeHtml(item.name)}</span> <span class="code">${escapeHtml(item.value.value)}</span>${annotation ? ` <span class="anno">=> ${escapeHtml(annotation)}</span>` : ''}`;
+          return line;
+        }
+
+        const details = el('details');
+        if (openByDefault || item.name === 'jointree') details.open = true;
+        const summary = el('summary');
+        let hint = '';
+        if (item.value.kind === 'node')
+          hint = ` <span class="meta">{${escapeHtml(item.value.type)}}</span>`;
+        else if (item.value.kind === 'list')
+          hint = ` <span class="meta">(list ${item.value.items.length})</span>`;
+        summary.innerHTML = `<span class="field">:${escapeHtml(item.name)}</span>${hint}`;
+        details.appendChild(summary);
+        details.appendChild(renderItem(item.value));
+        return details;
+      }
+
+      if (item.kind === 'node') {
+        const details = el('details');
+        details.open = openByDefault;
+        const summary = el('summary');
+        summary.innerHTML = `<span class="tag">{${escapeHtml(item.type)}}</span> <span class="meta">node</span>`;
+        details.appendChild(summary);
+        for (const child of item.children) details.appendChild(renderItem(child));
+        return details;
+      }
+
+      if (item.kind === 'list') {
+        const details = el('details');
+        details.open = openByDefault;
+        const summary = el('summary');
+        summary.innerHTML = `<span class="tag">(list)</span> <span class="meta">${item.items.length} item(s)</span>`;
+        details.appendChild(summary);
+        for (const child of item.items) details.appendChild(renderItem(child));
+        return details;
+      }
+
+      return el('div', 'leaf', JSON.stringify(item));
+    }
+
+    function setStatus(msg, isError = false) {
+      statusEl.textContent = msg;
+      statusEl.className = isError ? 'msg error' : 'msg';
+    }
+
+    function parseAndRender() {
+      try {
+        const text = input.value.trim();
+        if (!text) {
+          setStatus('Input is empty.', true);
+          treeEl.innerHTML = '';
+          metaEl.textContent = 'No parsed tree yet.';
+          lastAst = null;
+          oidAnnotations = {};
+          return false;
+        }
+        lastAst = parse(text);
+        renderTree(lastAst, treeEl);
+        setStatus('Parsed successfully.');
+        const count = treeEl.querySelectorAll('details').length;
+        metaEl.textContent = `Rendered ${count} expandable node(s).`;
+        return true;
+      } catch (err) {
+        setStatus(err.message || 'Parse failed.', true);
+        treeEl.innerHTML = '';
+        metaEl.textContent = 'Parse error.';
+        lastAst = null;
+        oidAnnotations = {};
+        return false;
+      }
+    }
+
+    async function resolveOids() {
+      if (!lastAst && !parseAndRender()) return;
+      const lookups = buildLookupPayload(lastAst);
+      const total = Object.values(lookups).reduce((acc, arr) => acc + arr.length, 0);
+
+      if (total === 0) {
+        setStatus('No resolvable OIDs found in tree.');
+        return;
+      }
+
+      setStatus(`Resolving ${total} OID(s) from database...`);
+
+      try {
+        const resp = await fetch('/api/resolve', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ connection: readConnConfig(), lookups })
+        });
+
+        const payload = await resp.json();
+        if (!resp.ok) {
+          throw new Error(payload.error || `HTTP ${resp.status}`);
+        }
+
+        oidAnnotations = payload.resolved || {};
+        renderTree(lastAst, treeEl);
+
+        const resolvedCount = Object.values(oidAnnotations).reduce(
+          (acc, map) => acc + Object.keys(map || {}).length,
+          0
+        );
+
+        const unresolved = total - resolvedCount;
+        const lines = [];
+        lines.push(`Resolved ${resolvedCount}/${total} OID(s).${unresolved > 0 ? ` Unresolved: ${unresolved}.` : ''}`);
+
+        const kindOrder = ['relid', 'nspid', 'opno', 'funcid', 'typeid', 'collid'];
+        for (const kind of kindOrder) {
+          const requested = lookups[kind] || [];
+          if (requested.length === 0) continue;
+          const resolvedMap = oidAnnotations[kind] || {};
+
+          const resolvedOids = [];
+          const unresolvedOids = [];
+          for (const oid of requested) {
+            const label = resolvedMap[String(oid)];
+            if (label)
+              resolvedOids.push(`${oid}=>${label}`);
+            else
+              unresolvedOids.push(String(oid));
+          }
+
+          if (resolvedOids.length > 0)
+            lines.push(`${kind} resolved: ${resolvedOids.join(', ')}`);
+          if (unresolvedOids.length > 0)
+            lines.push(`${kind} unresolved: ${unresolvedOids.join(', ')}`);
+        }
+
+        if (payload.errors && payload.errors.length > 0)
+          lines.push(`Warnings: ${payload.errors.join('; ')}`);
+
+        setStatus(lines.join('\n'));
+      } catch (err) {
+        setStatus(`OID resolve failed: ${err.message}`, true);
+      }
+    }
+
+    document.getElementById('parse').addEventListener('click', parseAndRender);
+    document.getElementById('resolve').addEventListener('click', resolveOids);
+
+    document.getElementById('load-sample').addEventListener('click', () => {
+      input.value = sample;
+      oidAnnotations = {};
+      setStatus('Sample loaded.');
+      parseAndRender();
+    });
+
+    document.getElementById('clear-input').addEventListener('click', () => {
+      input.value = '';
+      treeEl.innerHTML = '';
+      lastAst = null;
+      oidAnnotations = {};
+      setStatus('Cleared input.');
+      metaEl.textContent = 'No parsed tree yet.';
+    });
+
+    document.getElementById('expand-all').addEventListener('click', () => {
+      treeEl.querySelectorAll('details').forEach((d) => { d.open = true; });
+    });
+
+    document.getElementById('collapse-all').addEventListener('click', () => {
+      treeEl.querySelectorAll('details').forEach((d) => { d.open = false; });
+    });
+
+    document.getElementById('copy-json').addEventListener('click', async () => {
+      if (!lastAst) {
+        setStatus('Nothing to copy yet. Parse first.', true);
+        return;
+      }
+      try {
+        await navigator.clipboard.writeText(JSON.stringify(lastAst, null, 2));
+        setStatus('Copied parsed JSON to clipboard.');
+      } catch {
+        setStatus('Clipboard write failed. Browser may block it.', true);
+      }
+    });
+
+    input.value = sample;
+    parseAndRender();
+    input.focus();
+  </script>
+</body>
+</html>
