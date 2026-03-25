@@ -5,7 +5,8 @@
 ## Run
 
 ```bash
-cd experiment
+git clone git@github.com:evanchaoli/pgtreeviewer.git
+cd pgtreeviewer
 python3 server.py
 ```
 
@@ -18,6 +19,8 @@ Then open `http://127.0.0.1:8765`.
 - Supported lookup kinds include relation OIDs, operator OIDs, function OIDs, type OIDs, collation OIDs, and namespace OIDs.
 
 ## Connection Inputs
+
+None of these fields are mandatory. If all are left empty, the resolver uses libpq defaults and connects to your local PostgreSQL instance. In practice, you usually need to provide the correct database name, because many OIDs (for example relation OIDs) are database-local.
 
 Use the page inputs to set:
 
